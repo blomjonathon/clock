@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Time Clock</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="kiosk">
+  <main class="kiosk-card">
+    <header class="kiosk-head">
+      <h1 id="title">Time Clock</h1>
+      <div id="now-time" class="now-time">--:--</div>
+      <div id="now-date" class="now-date"></div>
+    </header>
+
+    <section id="loading-view">
+      <div class="spinner"></div>
+    </section>
+
+    <section id="setup-view" hidden>
+      <h2>Set up this phone</h2>
+      <p class="hint">Enter the setup code from your teacher and your PIN. You only need to do this once.</p>
+      <form id="setup-form" class="setup-form">
+        <label>Setup code
+          <input id="setup-code" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 placeholder="XXXX-XXXX" maxlength="9" required></label>
+        <label>Your PIN
+          <input id="setup-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required></label>
+        <p id="setup-error" class="error" hidden></p>
+        <button class="btn-primary big" type="submit">Set up</button>
+      </form>
+      <p class="loc-note">This phone will be linked to you. You will only be able to clock in from it.</p>
+    </section>
+
+    <section id="pin-view" hidden>
+      <p id="who" class="who"></p>
+      <p class="hint">Enter your PIN</p>
+      <div id="pin-dots" class="pin-dots" aria-live="polite"></div>
+      <div class="keypad">
+        <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+        <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button>
+        <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
+        <button data-key="clear" class="muted">Clear</button>
+        <button data-key="0">0</button>
+        <button data-key="back" class="muted" aria-label="Backspace">⌫</button>
+      </div>
+      <button id="submit" class="btn-primary big" disabled>Clock In / Out</button>
+      <p id="loc-note" class="loc-note" hidden>📍 Your location is checked to confirm you are at school.</p>
+    </section>
+
+    <section id="busy-view" hidden>
+      <div class="spinner"></div>
+      <p id="busy-text">Checking your location…</p>
+    </section>
+
+    <section id="result-view" hidden>
+      <div id="result-icon" class="result-icon"></div>
+      <h2 id="result-title"></h2>
+      <p id="result-detail" class="result-detail"></p>
+      <button id="done" class="btn-secondary">Done</button>
+    </section>
+  </main>
+  <script src="kiosk.js"></script>
+</body>
+</html>
