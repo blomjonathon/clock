@@ -12,8 +12,6 @@ const PIN_LENGTH = Math.min(8, Math.max(4, Number(process.env.PIN_LENGTH) || 6))
 // Otherwise anyone could fake their IP and get around the rate limits.
 const TRUST_PROXY = process.env.TRUST_PROXY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
-// GPS accuracy (metres) that may be added to the radius. Capped so a vague fix can't pass from far away.
-const MAX_ACCURACY_ALLOWANCE = 50;
 // Stops a double tap from clocking a student straight back out.
 const MIN_PUNCH_GAP_MS = 60 * 1000;
 
@@ -36,7 +34,7 @@ app.use((req, res, next) => {
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Permissions-Policy': 'geolocation=(self), camera=(), microphone=()',
+    'Permissions-Policy': 'geolocation=(), camera=(), microphone=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
   });
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -82,25 +80,12 @@ const route = (fn) => (req, res) => {
   }
 };
 
-function distanceMeters(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
 function localDate(iso, timeZone) {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
   } catch {
     return new Date(iso).toISOString().slice(0, 10);
   }
-}
-
-function geofenceActive(s) {
-  return s.geofence_enabled === 'true' && s.school_lat !== '' && s.school_lng !== '';
 }
 
 function parseIso(value, field, { optional = false } = {}) {
@@ -198,145 +183,28 @@ function passwordMatches(input) {
   return crypto.timingSafeEqual(a, b);
 }
 
-/* ---------------- student devices (each student signs in one phone) ---------------- */
-
-const DEVICE_COOKIE = 'device';
-const DEVICE_MAX_AGE_MS = 400 * 24 * 3600 * 1000; // the longest cookie lifetime browsers allow
-const SETUP_CODE_DAYS = 7;
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I, so codes are easy to read
-
-const normalizeCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-function safeEqual(a, b) {
-  return crypto.timingSafeEqual(
-    crypto.createHash('sha256').update(String(a)).digest(),
-    crypto.createHash('sha256').update(String(b)).digest()
-  );
-}
-
-// Creates a new setup code for a student. Any earlier unused code stops working.
-function issueSetupCode(studentId) {
-  let raw = '';
-  for (let i = 0; i < 8; i++) raw += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
-  const expiresAt = Date.now() + SETUP_CODE_DAYS * 24 * 3600 * 1000;
-  db.prepare(`
-    INSERT INTO setup_codes (student_id, code_hash, expires_at) VALUES (?, ?, ?)
-    ON CONFLICT(student_id) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at
-  `).run(studentId, sha256(`code:${raw}`), expiresAt);
-  return { code: `${raw.slice(0, 4)}-${raw.slice(4)}`, expires_at: expiresAt };
-}
-
-function getDevice(req) {
-  const token = readCookie(req, DEVICE_COOKIE);
-  if (!token || token.length > 100) return null;
-  return db.prepare(`
-    SELECT d.id, d.student_id, s.name, s.pin, s.active
-    FROM devices d JOIN students s ON s.id = d.student_id
-    WHERE d.token_hash = ?
-  `).get(sha256(`dev:${token}`)) || null;
-}
-
-function deviceLabel(ua = '') {
-  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
-    : /CrOS/.test(ua) ? 'Chromebook' : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : 'Device';
-  const browser = /EdgA?\/|EdgiOS/.test(ua) ? 'Edge' : /CriOS|Chrome\//.test(ua) ? 'Chrome'
-    : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
-  return `${os} · ${browser}`;
-}
-
 /* ---------------- public (student) API ---------------- */
 
 app.get('/api/config', route(() => {
   const s = getSettings();
-  return { title: s.title, locationRequired: geofenceActive(s) };
-}));
-
-// Tells the clock page whether this phone is set up, and for whom.
-app.get('/api/device', route((req) => {
-  const d = getDevice(req);
-  return d && d.active ? { registered: true, name: d.name } : { registered: false };
-}));
-
-app.post('/api/device/register', route((req, res) => {
-  const ipKey = `setup:${req.ip}`;
-  if (isLimited(ipKey, 15)) throw new HttpError(429, 'Too many attempts. Please wait 15 minutes and try again.');
-
-  const code = normalizeCode(req.body.code);
-  const pin = String(req.body.pin || '').trim();
-  const row = code.length === 8
-    ? db.prepare(`
-        SELECT sc.student_id, sc.expires_at, s.name, s.pin, s.active
-        FROM setup_codes sc JOIN students s ON s.id = sc.student_id
-        WHERE sc.code_hash = ?
-      `).get(sha256(`code:${code}`))
-    : null;
-  if (!row || row.expires_at < Date.now() || !row.active || !safeEqual(row.pin, pin)) {
-    recordFailure(ipKey, 15 * 60 * 1000);
-    throw new HttpError(401, 'The setup code or PIN is wrong, or the code has expired. Ask your teacher for a new code.');
-  }
-
-  const existing = getDevice(req);
-  if (existing && existing.student_id !== row.student_id) {
-    console.warn(`[security] Tried to set up ${row.name} on the phone already used by ${existing.name} (${req.ip})`);
-    throw new HttpError(409, 'This phone is already set up for another student. Each student must use their own phone.');
-  }
-
-  const token = crypto.randomBytes(32).toString('base64url');
-  const nowIso = new Date().toISOString();
-  db.exec('BEGIN');
-  try {
-    db.prepare('DELETE FROM devices WHERE student_id = ?').run(row.student_id); // a new phone replaces the old one
-    db.prepare('INSERT INTO devices (student_id, token_hash, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)')
-      .run(row.student_id, sha256(`dev:${token}`), deviceLabel(req.headers['user-agent']), nowIso, nowIso);
-    db.prepare('DELETE FROM setup_codes WHERE student_id = ?').run(row.student_id); // codes work only once
-    db.exec('COMMIT');
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
-  }
-  res.cookie(DEVICE_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: req.secure || IS_PROD,
-    maxAge: DEVICE_MAX_AGE_MS,
-    path: '/',
-  });
-  return { name: row.name };
+  return { title: s.title };
 }));
 
 app.post('/api/punch', route((req) => {
-  const device = getDevice(req);
-  if (!device || !device.active) {
-    throw new HttpError(401, 'This phone is not set up yet. Ask your teacher for a setup code.', { needsSetup: true });
-  }
-
-  const devKey = `pin:dev:${device.id}`;
-  if (isLimited(devKey, 5)) throw new HttpError(429, 'Too many wrong PINs on this phone. Please wait 10 minutes.');
-  if (!safeEqual(device.pin, String(req.body.pin || '').trim())) {
-    recordFailure(devKey, 10 * 60 * 1000);
+  // Students share school Wi-Fi (one IP), so this limit is generous enough for typos
+  // but still stops anyone from trying PINs one after another.
+  const ipKey = `pin:${req.ip}`;
+  if (isLimited(ipKey, 20)) throw new HttpError(429, 'Too many wrong PINs. Please wait 15 minutes and try again.');
+  const pin = String(req.body.pin || '').trim();
+  const student = /^\d{4,8}$/.test(pin)
+    ? db.prepare('SELECT id, name FROM students WHERE pin = ? AND active = 1').get(pin)
+    : null;
+  if (!student) {
+    recordFailure(ipKey, 15 * 60 * 1000);
     throw new HttpError(401, 'Wrong PIN.');
   }
-  failures.delete(devKey);
-  const student = { id: device.student_id, name: device.name };
-  db.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').run(new Date().toISOString(), device.id);
 
   const s = getSettings();
-  let dist = null;
-  if (geofenceActive(s)) {
-    const lat = Number(req.body.lat);
-    const lng = Number(req.body.lng);
-    const accuracy = Math.max(0, Number(req.body.accuracy) || 0);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      throw new HttpError(400, 'Your location is needed to clock in. Please allow location access and try again.');
-    }
-    dist = distanceMeters(lat, lng, Number(s.school_lat), Number(s.school_lng));
-    const radius = Number(s.radius_m) || 150;
-    if (dist - Math.min(accuracy, MAX_ACCURACY_ALLOWANCE) > radius) {
-      throw new HttpError(403, `You need to be at school to clock in or out. You appear to be about ${Math.round(dist)} m away.`);
-    }
-    dist = Math.round(dist);
-  }
-
   const now = new Date();
   const nowIso = now.toISOString();
   const open = db.prepare(
@@ -348,14 +216,14 @@ app.post('/api/punch', route((req) => {
     if (now - new Date(open.clock_in) < MIN_PUNCH_GAP_MS) {
       throw new HttpError(409, `${student.name}, you just clocked in. Wait a minute before clocking out.`);
     }
-    db.prepare('UPDATE entries SET clock_out = ?, out_dist = ? WHERE id = ?').run(nowIso, dist, open.id);
+    db.prepare('UPDATE entries SET clock_out = ? WHERE id = ?').run(nowIso, open.id);
     const hours = (now - new Date(open.clock_in)) / 3600000;
     return { name: student.name, action: 'out', time: nowIso, clockIn: open.clock_in, hours };
   }
 
   // No open entry, or a forgotten clock out from an earlier day. That entry stays open and is
   // flagged in the admin report. This punch starts a new entry.
-  db.prepare('INSERT INTO entries (student_id, clock_in, in_dist) VALUES (?, ?, ?)').run(student.id, nowIso, dist);
+  db.prepare('INSERT INTO entries (student_id, clock_in) VALUES (?, ?)').run(student.id, nowIso);
   return { name: student.name, action: 'in', time: nowIso, missedClockOut: !!open };
 }));
 
@@ -405,39 +273,10 @@ app.get('/api/admin/students', route(() => {
   return db.prepare(`
     SELECT s.id, s.name, s.pin, s.active,
            (SELECT clock_in FROM entries e WHERE e.student_id = s.id AND e.clock_out IS NULL
-             ORDER BY clock_in DESC LIMIT 1) AS open_since,
-           d.label AS device_label, d.created_at AS device_since, d.last_seen AS device_last_seen,
-           CASE WHEN sc.expires_at > ? THEN sc.expires_at END AS code_expires
+             ORDER BY clock_in DESC LIMIT 1) AS open_since
     FROM students s
-    LEFT JOIN devices d ON d.student_id = s.id
-    LEFT JOIN setup_codes sc ON sc.student_id = s.id
     ORDER BY s.active DESC, s.name COLLATE NOCASE
-  `).all(Date.now());
-}));
-
-// New setup code for one student (e.g. they got a new phone).
-app.post('/api/admin/students/:id/setup-code', route((req) => {
-  const s = db.prepare('SELECT id, name, pin FROM students WHERE id = ? AND active = 1').get(Number(req.params.id));
-  if (!s) throw new HttpError(404, 'Student not found or inactive.');
-  return { name: s.name, pin: s.pin, ...issueSetupCode(s.id) };
-}));
-
-// Setup codes for every active student who doesn't have a phone set up yet (for the printable sheet).
-app.post('/api/admin/setup-codes', route(() => {
-  const students = db.prepare(`
-    SELECT s.id, s.name, s.pin FROM students s
-    WHERE s.active = 1 AND NOT EXISTS (SELECT 1 FROM devices d WHERE d.student_id = s.id)
-    ORDER BY s.name COLLATE NOCASE
   `).all();
-  return students.map((s) => ({ name: s.name, pin: s.pin, ...issueSetupCode(s.id) }));
-}));
-
-// Sign a student's phone out, so it can no longer clock in.
-app.delete('/api/admin/students/:id/device', route((req) => {
-  const id = Number(req.params.id);
-  db.prepare('DELETE FROM devices WHERE student_id = ?').run(id);
-  db.prepare('DELETE FROM setup_codes WHERE student_id = ?').run(id);
-  return { ok: true };
 }));
 
 app.post('/api/admin/students', route((req) => {
@@ -551,19 +390,6 @@ app.put('/api/admin/settings', route((req) => {
   const b = req.body || {};
   const patch = {};
   if (b.title !== undefined) patch.title = String(b.title).trim().slice(0, 80) || 'Student Time Clock';
-  for (const [key, min, max] of [['school_lat', -90, 90], ['school_lng', -180, 180]]) {
-    if (b[key] === undefined) continue;
-    if (b[key] === '' || b[key] === null) { patch[key] = ''; continue; }
-    const n = Number(b[key]);
-    if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `Invalid ${key.replace('school_', '')}.`);
-    patch[key] = n;
-  }
-  if (b.radius_m !== undefined) {
-    const r = Number(b.radius_m);
-    if (!Number.isFinite(r) || r < 25 || r > 5000) throw new HttpError(400, 'Radius must be between 25 and 5000 metres.');
-    patch.radius_m = Math.round(r);
-  }
-  if (b.geofence_enabled !== undefined) patch.geofence_enabled = b.geofence_enabled ? 'true' : 'false';
   if (b.timezone !== undefined) {
     try { new Intl.DateTimeFormat('en-US', { timeZone: b.timezone }); }
     catch { throw new HttpError(400, 'Unknown time zone.'); }

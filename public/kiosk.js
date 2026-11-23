@@ -2,14 +2,10 @@
   const MAX_PIN = 8;
   const RESET_AFTER_MS = 6000;
   let pin = '';
-  let config = { title: 'Time Clock', locationRequired: false };
   let resetTimer = null;
 
   const $ = (id) => document.getElementById(id);
-  const views = {
-    loading: $('loading-view'), setup: $('setup-view'), pin: $('pin-view'), busy: $('busy-view'), result: $('result-view'),
-  };
-  let signedInAs = null;
+  const views = { pin: $('pin-view'), busy: $('busy-view'), result: $('result-view') };
 
   function show(name) {
     for (const [k, el] of Object.entries(views)) el.hidden = k !== name;
@@ -52,22 +48,6 @@
     renderPin();
   }
 
-  function getLocation() {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) return reject(new Error('This device cannot share its location.'));
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(pos.coords),
-        (err) => {
-          const msg = err.code === err.PERMISSION_DENIED
-            ? 'Location access is blocked. Allow location for this site in your browser settings, then try again.'
-            : 'Could not get your location. Make sure location services are on and try again.';
-          reject(new Error(msg));
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
-      );
-    });
-  }
-
   function showResult(kind, title, detail) {
     $('result-icon').className = `result-icon ${kind}`;
     $('result-icon').textContent = kind === 'error' ? '!' : '✓';
@@ -82,53 +62,13 @@
     clearTimeout(resetTimer);
     pin = '';
     renderPin();
-    if (!signedInAs) return showSetup();
-    $('who').textContent = `Signed in as ${signedInAs}`;
     show('pin');
   }
-
-  function showSetup(message) {
-    signedInAs = null;
-    $('setup-error').textContent = message || '';
-    $('setup-error').hidden = !message;
-    show('setup');
-  }
-
-  $('setup-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button');
-    btn.disabled = true;
-    $('setup-error').hidden = true;
-    try {
-      const res = await fetch('/api/device/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: $('setup-code').value, pin: $('setup-pin').value }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Setup failed. Please try again.');
-      signedInAs = data.name;
-      $('setup-code').value = '';
-      $('setup-pin').value = '';
-      showResult('in', `You're all set, ${data.name}!`, 'This phone is now linked to you. Use your PIN to clock in and out.');
-    } catch (err) {
-      $('setup-error').textContent = err.message;
-      $('setup-error').hidden = false;
-    } finally {
-      btn.disabled = false;
-    }
-  });
 
   async function submit() {
     if (pin.length < 4) return;
     const body = { pin };
     try {
-      if (config.locationRequired) {
-        $('busy-text').textContent = 'Checking your location…';
-        show('busy');
-        const c = await getLocation();
-        Object.assign(body, { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy });
-      }
       $('busy-text').textContent = 'Saving…';
       show('busy');
       const res = await fetch('/api/punch', {
@@ -137,7 +77,6 @@
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      if (data.needsSetup) return showSetup('This phone was signed out. Ask your teacher for a new setup code.');
       if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
 
       const t = fmtTime(new Date(data.time));
@@ -170,23 +109,9 @@
   });
 
   fetch('/api/config').then((r) => r.json()).then((c) => {
-    config = c;
     document.title = c.title;
     $('title').textContent = c.title;
-    $('loc-note').hidden = !c.locationRequired;
   }).catch(() => {});
-
-  // A setup link like /?code=ABCD-EFGH fills in the code automatically.
-  const linkCode = new URLSearchParams(location.search).get('code');
-  if (linkCode) {
-    $('setup-code').value = linkCode.slice(0, 9);
-    history.replaceState(null, '', location.pathname);
-  }
-
-  fetch('/api/device').then((r) => r.json()).then((d) => {
-    signedInAs = d.registered ? d.name : null;
-    reset();
-  }).catch(() => showSetup('Could not reach the server. Check your connection and reload.'));
 
   tick();
   setInterval(tick, 1000);

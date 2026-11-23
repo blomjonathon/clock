@@ -14,27 +14,7 @@
       <div id="now-date" class="now-date"></div>
     </header>
 
-    <section id="loading-view">
-      <div class="spinner"></div>
-    </section>
-
-    <section id="setup-view" hidden>
-      <h2>Set up this phone</h2>
-      <p class="hint">Enter the setup code from your teacher and your PIN. You only need to do this once.</p>
-      <form id="setup-form" class="setup-form">
-        <label>Setup code
-          <input id="setup-code" autocomplete="off" autocapitalize="characters" spellcheck="false"
-                 placeholder="XXXX-XXXX" maxlength="9" required></label>
-        <label>Your PIN
-          <input id="setup-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required></label>
-        <p id="setup-error" class="error" hidden></p>
-        <button class="btn-primary big" type="submit">Set up</button>
-      </form>
-      <p class="loc-note">This phone will be linked to you. You will only be able to clock in from it.</p>
-    </section>
-
-    <section id="pin-view" hidden>
-      <p id="who" class="who"></p>
+    <section id="pin-view">
       <p class="hint">Enter your PIN</p>
       <div id="pin-dots" class="pin-dots" aria-live="polite"></div>
       <div class="keypad">
@@ -46,12 +26,11 @@
         <button data-key="back" class="muted" aria-label="Backspace">⌫</button>
       </div>
       <button id="submit" class="btn-primary big" disabled>Clock In / Out</button>
-      <p id="loc-note" class="loc-note" hidden>📍 Your location is checked to confirm you are at school.</p>
     </section>
 
     <section id="busy-view" hidden>
       <div class="spinner"></div>
-      <p id="busy-text">Checking your location…</p>
+      <p id="busy-text">Saving…</p>
     </section>
 
     <section id="result-view" hidden>

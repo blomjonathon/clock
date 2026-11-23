@@ -25,8 +25,8 @@ db.exec(`
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     clock_in   TEXT    NOT NULL,   -- ISO 8601 UTC
     clock_out  TEXT,               -- NULL while clocked in
-    in_dist    REAL,               -- metres from school at clock in
-    out_dist   REAL,               -- metres from school at clock out
+    in_dist    REAL,               -- unused (old location check)
+    out_dist   REAL,               -- unused (old location check)
     note       TEXT,
     edited_at  TEXT                -- set when an admin changes the entry
   );
@@ -34,22 +34,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_entries_student ON entries(student_id, clock_in);
   CREATE INDEX IF NOT EXISTS idx_entries_in      ON entries(clock_in);
 
-  -- The one phone/browser each student is allowed to clock in from. Only a hash of the device key is stored.
-  CREATE TABLE IF NOT EXISTS devices (
-    id         INTEGER PRIMARY KEY,
-    student_id INTEGER NOT NULL UNIQUE REFERENCES students(id) ON DELETE CASCADE,
-    token_hash TEXT    NOT NULL UNIQUE,
-    label      TEXT,
-    created_at TEXT    NOT NULL,
-    last_seen  TEXT
-  );
-
-  -- One-time codes the teacher hands out to set up a student's phone.
-  CREATE TABLE IF NOT EXISTS setup_codes (
-    student_id INTEGER PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
-    code_hash  TEXT    NOT NULL UNIQUE,
-    expires_at INTEGER NOT NULL
-  );
+  -- Phone setup was removed. Students now clock in with their PIN alone.
+  DROP TABLE IF EXISTS devices;
+  DROP TABLE IF EXISTS setup_codes;
 
   -- Admin logins. Only a hash of each token is stored, so a copied database can't be used to sign in.
   CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -66,10 +53,6 @@ db.exec(`
 
 const DEFAULT_SETTINGS = {
   title: 'Student Time Clock',
-  school_lat: '',
-  school_lng: '',
-  radius_m: '150',
-  geofence_enabled: 'true',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
 };
 

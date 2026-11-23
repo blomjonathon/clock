@@ -1,7 +1,7 @@
 {
   "name": "student-time-clock",
   "version": "1.0.0",
-  "description": "Simple PIN-based clock in / clock out for students with location check and weekly timesheet review.",
+  "description": "Simple PIN-based clock in / clock out for students with weekly timesheet review.",
   "main": "server.js",
   "private": true,
   "scripts": {

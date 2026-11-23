@@ -30,7 +30,6 @@
       <button id="logout" class="btn-link">Sign out</button>
     </header>
 
-    <div id="banner" class="banner" hidden></div>
     <div id="toast" class="toast" hidden></div>
 
     <!-- REPORT -->
@@ -76,7 +75,7 @@
       </div>
       <div class="toolbar">
         <h2>Students <span id="student-count" class="muted"></span></h2>
-        <button id="print-pins" class="btn-secondary" title="Prints a cut-out slip for each student who hasn't set up a phone yet, with their PIN and a new one-time setup code">Print setup slips</button>
+        <button id="print-pins" class="btn-secondary" title="Prints a cut-out slip with the app address and PIN for each active student">Print PIN slips</button>
       </div>
       <div class="table-wrap">
         <table class="list" id="students-table"></table>
@@ -94,18 +93,6 @@
         </label>
         <datalist id="tz-list"></datalist>
 
-        <h3>School location</h3>
-        <label class="check"><input type="checkbox" name="geofence_enabled"> Students must be at school to clock in or out</label>
-        <div class="grid-2">
-          <label>Latitude <input name="school_lat" inputmode="decimal" placeholder="e.g. 40.7128"></label>
-          <label>Longitude <input name="school_lng" inputmode="decimal" placeholder="e.g. -74.0060"></label>
-        </div>
-        <label>Allowed distance (metres) <input name="radius_m" type="number" min="25" max="5000" step="5"></label>
-        <p class="muted small">Tip: open this page on a phone while standing at school and press the button below. Use 150–300 m to cover the whole campus and allow for GPS drift.</p>
-        <div class="row">
-          <button type="button" id="use-my-location" class="btn-secondary">📍 Use my current location</button>
-          <a id="map-link" target="_blank" rel="noopener" hidden>View on map ↗</a>
-        </div>
         <button class="btn-primary" type="submit">Save settings</button>
       </form>
     </section>

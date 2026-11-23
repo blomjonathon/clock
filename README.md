@@ -2,16 +2,16 @@
 
 A simple clock-in and clock-out app for about 30 students.
 
-- **Students** go to `/`, type their PIN, and press **Clock In / Out**. The app checks their phone's GPS location against the school location. The first punch of the day clocks them in and the next one clocks them out.
+- **Students** go to `/`, type their PIN, and press **Clock In / Out**. The first punch of the day clocks them in and the next one clocks them out.
 - **Admin** goes to `/admin` to:
   - see the weekly timesheet, with hours per student per day and missing clock-outs flagged
   - edit, add, or delete entries (anything an admin changes is marked "edited")
   - export to CSV or print
-  - manage students and PINs, and set the school location
+  - manage students and PINs
 
 ## Why it needs a server (not GitHub Pages)
 
-GitHub Pages can only serve static files. It can't store punches from 30 different phones in one place, and it can't enforce the location check. This app is a small Node.js server with a built-in SQLite database. The code can still live on GitHub. You deploy it to a host that runs Node.
+GitHub Pages can only serve static files. It can't store punches from 30 different phones in one place. This app is a small Node.js server with a built-in SQLite database. The code can still live on GitHub. You deploy it to a host that runs Node.
 
 ## Run locally
 
@@ -45,8 +45,7 @@ What the app already does:
 - **Admin sessions:** each login gets a random 256-bit token. Only its hash is stored, and the cookie is `HttpOnly`, `SameSite=Strict` and `Secure` in production. Sessions expire after 8 hours. Sign-out truly revokes the session, and **Sign out everywhere** ends every session.
 - **Cross-site request forgery (CSRF):** requests from other sites are rejected by an Origin check, and only JSON is accepted.
 - **XSS and clickjacking:** a strict Content Security Policy, `X-Frame-Options: DENY`, `nosniff`, and HSTS over HTTPS. All names and notes are escaped before display.
-- **Student phones:** each phone gets a random 256-bit key in an `HttpOnly` cookie that scripts can't read. Only a hash of the key is stored, and setup codes are stored hashed too.
-- **PINs:** 6-digit random PINs by default, with easy PINs like `111111` and `123456` skipped. With 30 students, a random guess has about a 1-in-33,000 chance of hitting one.
+- **PINs:** 6-digit random PINs by default, with easy PINs like `111111` and `123456` skipped. With 30 students, a random guess has about a 1-in-33,000 chance of hitting one. 20 wrong PINs from one network locks it out for 15 minutes.
 - **Data:** `clock.db` is outside `public/`, so it can never be downloaded. `data/` and `.env` are in `.gitignore`.
 
 Your part:
@@ -62,24 +61,17 @@ Your part:
 ## First-time setup
 
 1. Sign in at `/admin`.
-2. **Settings:** stand at school with a phone, open `/admin`, and press **Use my current location**. Then press **Save**. A radius of 150–300 m usually covers a campus.
+2. **Settings:** check the time zone is right, then press **Save**.
 3. **Students:** paste all the names into **Add many at once**. Each student gets a unique random 6-digit PIN.
-4. Press **Print setup slips**. Each student gets a slip with the app address, their PIN, and a one-time **setup code**.
-5. Each student opens the address on **their own phone**, enters the setup code and PIN, and that phone is now signed in as them.
+4. Press **Print PIN slips** and hand each student their slip. It has the app address and their PIN.
 
-## Phone sign-in (how sharing is prevented)
+That's all. Students open the address on any phone and enter their PIN to clock in or out.
 
-- The clock page does nothing until a phone is set up with a teacher-issued code. A stranger with the link only sees the setup screen.
-- Each setup code works **once** and expires after 7 days.
-- Each student can clock in from **one** phone only. Setting up a new phone signs out the old one.
-- A phone already set up for one student **can't** be set up for a second student, and a PIN only works on its owner's phone.
-- 5 wrong PINs on a phone locks it for 10 minutes.
-- **New phone or cleared browser data:** in **Students**, press **Setup code** to give them a new one. To sign a phone out right away (lost phone), press **Reset phone**.
-- **iPhone tip:** a home-screen shortcut has its own storage, separate from Safari. Students who want to use a home-screen icon should add it *first*, open it, and then do the setup inside it.
+**Lost or shared PIN:** in **Students**, press **New PIN** to give that student a new one. The old one stops working right away.
 
 ## Deploying
 
-The location check only works over **HTTPS**, because browsers block GPS on plain `http://` (except on `localhost`). Any of these hosts provide HTTPS automatically:
+Deploy over **HTTPS** so PINs and admin sign-ins aren't sent in plain text. Any of these hosts provide HTTPS automatically:
 
 - **Railway** or **Render**: connect the GitHub repo. Set the start command to `npm start` and set `ADMIN_PASSWORD`, `NODE_ENV=production`, and `TRUST_PROXY=1`. **Attach a persistent disk or volume** and set `DATA_DIR` to its mount path. Without one, the timesheet data is wiped on every redeploy.
 - **A school computer or server**: run `npm start` behind a reverse proxy with HTTPS (for example Caddy).
@@ -94,4 +86,4 @@ Back up `clock.db` (in `DATA_DIR`) from time to time.
 
 ## Limits to know about
 
-The location check uses the location the student's browser reports. That stops casual clock-ins from home. A determined student with a location-spoofing tool could still get around it, as with any web-based geofence. Check the report for odd patterns.
+There is no location check, so a student can clock in from anywhere, and anyone who knows a student's PIN can clock in as them. Check the report for odd patterns, and press **New PIN** for any student whose PIN gets around.

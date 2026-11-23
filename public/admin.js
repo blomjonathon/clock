@@ -350,15 +350,11 @@
   function renderStudents() {
     const active = state.students.filter((s) => s.active).length;
     $('#student-count').textContent = `(${active} active${state.students.length > active ? `, ${state.students.length - active} inactive` : ''})`;
-    $('#students-table').innerHTML = `<thead><tr><th>Name</th><th>PIN</th><th>Phone</th><th>Status</th><th></th></tr></thead><tbody>${
+    $('#students-table').innerHTML = `<thead><tr><th>Name</th><th>PIN</th><th>Status</th><th></th></tr></thead><tbody>${
       state.students.map((s) => `
         <tr class="${s.active ? '' : 'inactive'}">
           <td>${esc(s.name)}</td>
           <td><code>${esc(s.pin)}</code></td>
-          <td>${s.device_label
-            ? `<span class="tag live" title="Set up ${esc(fmtDate(s.device_since))}${s.device_last_seen ? `, last used ${esc(fmtDate(s.device_last_seen))}` : ''}">✓ ${esc(s.device_label)}</span>`
-            : s.code_expires ? `<span class="tag">code sent, expires ${esc(fmtDate(s.code_expires))}</span>`
-            : '<span class="tag danger">not set up</span>'}</td>
           <td>${!s.active ? '<span class="tag">inactive</span>'
             : s.open_since ? (sameDay(new Date(s.open_since), new Date())
               ? `<span class="tag live">on clock since ${fmtTime(s.open_since)}</span>`
@@ -367,12 +363,10 @@
             <button class="btn-link" data-act="rename" data-id="${s.id}">Rename</button>
             <button class="btn-link" data-act="pin" data-id="${s.id}">Set PIN</button>
             <button class="btn-link" data-act="newpin" data-id="${s.id}">New PIN</button>
-            ${s.active ? `<button class="btn-link" data-act="code" data-id="${s.id}">Setup code</button>` : ''}
-            ${s.device_label ? `<button class="btn-link" data-act="unlink" data-id="${s.id}">Reset phone</button>` : ''}
             <button class="btn-link" data-act="toggle" data-id="${s.id}">${s.active ? 'Deactivate' : 'Reactivate'}</button>
             <button class="btn-link danger" data-act="delete" data-id="${s.id}">Delete</button>
           </td>
-        </tr>`).join('') || '<tr><td colspan="5" class="empty">No students yet.</td></tr>'
+        </tr>`).join('') || '<tr><td colspan="4" class="empty">No students yet.</td></tr>'
     }</tbody>`;
   }
 
@@ -400,20 +394,6 @@
           toast(`${s.name}'s new PIN is ${r.pin}`);
           break;
         }
-        case 'code': {
-          const msg = s.device_label
-            ? `Create a setup code for ${s.name}?\n\nWhen they use it, their current phone (${s.device_label}) will be signed out.`
-            : `Create a setup code for ${s.name}?`;
-          if (!confirm(msg)) return;
-          const r = await api('POST', `/api/admin/students/${s.id}/setup-code`);
-          alert(`${r.name}\n\nSetup code: ${r.code}\nPIN: ${r.pin}\n\nOn their phone, open:\n${location.origin}/?code=${r.code}\n\nThe code works once and expires ${fmtDate(r.expires_at)}.`);
-          break;
-        }
-        case 'unlink':
-          if (!confirm(`Sign out ${s.name}'s phone (${s.device_label})?\n\nIt will no longer be able to clock in until you give them a new setup code.`)) return;
-          await api('DELETE', `/api/admin/students/${s.id}/device`);
-          toast(`${s.name}'s phone was signed out`);
-          break;
         case 'toggle':
           await api('PUT', `/api/admin/students/${s.id}`, { active: !s.active });
           break;
@@ -449,26 +429,22 @@
     } catch (ex) { toast(ex.message, true); }
   });
 
-  $('#print-pins').addEventListener('click', async () => {
-    const pending = state.students.filter((s) => s.active && !s.device_label).length;
-    if (!pending) return toast('Every active student already has a phone set up.');
-    if (!confirm(`Print setup slips for the ${pending} student(s) without a phone set up?\n\nThis creates new one-time codes. Any older unused codes stop working.`)) return;
-    // Open the window before the request so pop-up blockers allow it.
+  $('#print-pins').addEventListener('click', () => {
+    const list = state.students.filter((s) => s.active);
+    if (!list.length) return toast('Add some students first.');
     const w = window.open('', '_blank');
-    if (!w) return toast('Allow pop-ups to print the setup slips.', true);
+    if (!w) return toast('Allow pop-ups to print the PIN slips.', true);
     try {
-      const list = await api('POST', '/api/admin/setup-codes');
       const title = esc(state.settings?.title || 'Time Clock');
       const url = esc(location.origin);
       const slips = list.map((s) => `
         <div class="slip">
           <h3>${esc(s.name)}</h3>
-          <p>1. On <b>your own phone</b>, open <b>${url}</b></p>
-          <p>2. Enter your setup code and PIN.</p>
-          <div class="codes"><div><small>Setup code</small><b>${esc(s.code)}</b></div><div><small>PIN</small><b>${esc(s.pin)}</b></div></div>
-          <p class="fine">The setup code works once and expires ${esc(fmtDate(s.expires_at))}. Keep your PIN private.</p>
+          <p>Open <b>${url}</b> and enter your PIN to clock in or out.</p>
+          <div class="codes"><div><small>PIN</small><b>${esc(s.pin)}</b></div></div>
+          <p class="fine">Keep your PIN private. It is how the app knows it's you.</p>
         </div>`).join('');
-      w.document.write(`<!doctype html><title>${title} setup slips</title>
+      w.document.write(`<!doctype html><title>${title} PIN slips</title>
         <style>
           body{font:13px system-ui;margin:16px}
           .grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
@@ -478,11 +454,10 @@
           .codes small{display:block;color:#666} .codes b{font:700 20px ui-monospace,monospace;letter-spacing:.08em}
           .fine{color:#666;font-size:11px}
         </style>
-        <h2>${title}: phone setup</h2><div class="grid">${slips}</div>`);
+        <h2>${title}: PINs</h2><div class="grid">${slips}</div>`);
       w.document.close();
       w.focus();
       w.print();
-      await loadStudents();
     } catch (ex) {
       w.close();
       toast(ex.message, true);
@@ -503,33 +478,7 @@
     const f = $('#settings-form');
     f.title.value = s.title;
     f.timezone.value = s.timezone;
-    f.geofence_enabled.checked = s.geofence_enabled === 'true';
-    f.school_lat.value = s.school_lat;
-    f.school_lng.value = s.school_lng;
-    f.radius_m.value = s.radius_m;
     $('#app-title').textContent = `${s.title} · Admin`;
-    updateMapLink();
-    updateBanner();
-  }
-
-  function updateMapLink() {
-    const f = $('#settings-form');
-    const ok = f.school_lat.value && f.school_lng.value;
-    const a = $('#map-link');
-    a.hidden = !ok;
-    if (ok) a.href = `https://www.google.com/maps?q=${encodeURIComponent(f.school_lat.value)},${encodeURIComponent(f.school_lng.value)}`;
-  }
-
-  function updateBanner() {
-    const s = state.settings;
-    const b = $('#banner');
-    if (s.geofence_enabled !== 'true') {
-      b.textContent = 'The location check is OFF. Students can clock in from anywhere. Turn it on in Settings.';
-      b.hidden = false;
-    } else if (!s.school_lat || !s.school_lng) {
-      b.textContent = 'The school location is not set yet, so students can clock in from anywhere. Set it in Settings.';
-      b.hidden = false;
-    } else b.hidden = true;
   }
 
   try {
@@ -541,34 +490,6 @@
     $('#settings-form').timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
   });
 
-  $('#settings-form').addEventListener('input', (e) => {
-    if (e.target.name === 'school_lat' || e.target.name === 'school_lng') updateMapLink();
-  });
-
-  $('#use-my-location').addEventListener('click', () => {
-    const btn = $('#use-my-location');
-    if (!navigator.geolocation) return toast('This browser cannot share its location.', true);
-    btn.disabled = true;
-    btn.textContent = 'Locating…';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const f = $('#settings-form');
-        f.school_lat.value = pos.coords.latitude.toFixed(6);
-        f.school_lng.value = pos.coords.longitude.toFixed(6);
-        updateMapLink();
-        toast(`Location captured (±${Math.round(pos.coords.accuracy)} m). Press Save to keep it.`);
-        btn.disabled = false;
-        btn.textContent = '📍 Use my current location';
-      },
-      (err) => {
-        toast(err.message || 'Could not get location.', true);
-        btn.disabled = false;
-        btn.textContent = '📍 Use my current location';
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-    );
-  });
-
   $('#settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -576,10 +497,6 @@
       state.settings = await api('PUT', '/api/admin/settings', {
         title: f.title.value,
         timezone: f.timezone.value.trim(),
-        geofence_enabled: f.geofence_enabled.checked,
-        school_lat: f.school_lat.value.trim(),
-        school_lng: f.school_lng.value.trim(),
-        radius_m: f.radius_m.value,
       });
       fillSettings();
       toast('Settings saved');
