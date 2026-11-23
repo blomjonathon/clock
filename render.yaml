@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: student-time-clock
+    runtime: node
+    plan: free            # for testing. Data is wiped on every redeploy/restart on the free plan.
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: ADMIN_PASSWORD
+        sync: false       # Render asks you for this in the dashboard. Never commit it.
+
+    # For real use, switch to a paid plan (Starter) and uncomment this so data survives redeploys:
+    # plan: starter
+    # disk:
+    #   name: clock-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+    # ...and add an env var:  DATA_DIR = /var/data
